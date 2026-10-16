@@ -1,0 +1,24 @@
+sites:
+  lake_erie:
+    bbox: [-83.70, 41.20, -82.30, 42.10]
+    dates: ["2024-08-10", "2024-08-19"]
+    water_type: lake
+pace:
+  short_name: PACE_OCI_L2_AOP
+  version: "3.2"
+  n_granules: 3
+  flags:
+    invalid: [ATMFAIL, LAND, HIGLINT, HILT, HISATZEN, STRAYLIGHT, CLDICE, COCCOLITH,
+              HISOLZEN, LOWLW, CHLFAIL, NAVWARN, MAXAERITER, CHLWARN, ATMWARN,
+              NAVFAIL, PRODFAIL]
+qc:
+  rrs_range: [-0.01, 0.10]
+plots:
+  n_spectra: 20
+  seed: 42
+  reference_wavelength_nm: 443
+  marker_wavelengths_nm: [443, 615, 670]
+paths:
+  raw: data/raw/pace_oci_l2_aop
+  zarr: data/processed/pace_oci_l2_aop_zarr
+  figures: figures

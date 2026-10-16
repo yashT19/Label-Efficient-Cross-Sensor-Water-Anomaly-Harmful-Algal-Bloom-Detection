@@ -3,11 +3,11 @@
 Final-year BTP: **cross-sensor hyperspectral self-supervised learning for harmful algal bloom (HAB) detection**.
 
 - **Source sensor (data-rich):** NASA PACE OCI
-- **Target sensor (data-scarce):** ISRO HysIS VNIR
+- **Target sensor (data-scarce):** DLR EnMAP
 
-High-level goal: learn representations on abundant PACE OCI spectra and transfer them to HysIS, where labelled HAB data are scarce.
+High-level goal: learn representations on abundant PACE OCI spectra and transfer them to EnMAP, where labelled HAB data are scarce.
 
-The proposal’s Module 1 is **Acquire, Calibrate & Spectrally Align**. This repo currently implements only the first slice of that: **PACE OCI, small scale**, to confirm search → mask → Zarr → plot before adding HysIS or scaling.
+The proposal’s Module 1 is **Acquire, Calibrate & Spectrally Align**. This repo currently implements only the first slice of that: **PACE OCI, small scale**, to confirm search → mask → Zarr → plot before adding EnMAP or scaling.
 
 Proposal PDF (not in this repo): `c:\Users\tippa\Desktop\BTP material\BTP_Proposal_HAB_Hyperspectral_v2.pdf`
 
@@ -17,7 +17,7 @@ Proposal PDF (not in this repo): `c:\Users\tippa\Desktop\BTP material\BTP_Propos
 
 **Done:** Module 1 first pass for PACE OCI. Three `PACE_OCI_L2_AOP` granules are on disk, flag-masked, cropped to a western Lake Erie ROI, written to Zarr (with wavelength metadata), sanity-checked, and plotted.
 
-**Not started:** HysIS, SRF / spectral alignment, SSL training, Indian target sites.
+**Not started:** EnMAP ingest, SRF / spectral alignment, SSL training, Indian target sites.
 
 ---
 
@@ -30,7 +30,7 @@ cd "c:\Users\tippa\BTP Project"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python module1_pace_oci_validation.py
+python run.py --site lake_erie --sensor pace
 ```
 
 If `Activate.ps1` is blocked:
@@ -49,7 +49,14 @@ Zarr is a **local** chunked-array format (a folder of files). No Zarr account.
 
 | Path | Contents |
 |---|---|
-| `module1_pace_oci_validation.py` | PACE OCI acquire / mask / Zarr / plot script |
+| `run.py` | Config-driven PACE OCI CLI |
+| `config.yaml` | Site, product, flag, QC, plot, and output settings |
+| `src/pace_io.py` | Earthdata search, download, and NetCDF group opening |
+| `src/masking.py` | PACE flag mask and ROI crop |
+| `src/zarr_schema.py` | Existing per-granule Zarr writer |
+| `src/qc.py` | Per-granule sanity checks and QC row |
+| `src/plots.py` | Sample valid-water spectrum plots |
+| `tests/test_regression.py` | Lake Erie regression checks |
 | `requirements.txt` | Python dependencies |
 | `data/raw/pace_oci_l2_aop/` | Downloaded L2 AOP NetCDFs |
 | `data/processed/pace_oci_l2_aop_zarr/` | One Zarr store per granule |
@@ -60,16 +67,17 @@ Zarr is a **local** chunked-array format (a folder of files). No Zarr account.
 
 ## Pipeline
 
-`python module1_pace_oci_validation.py`
+`python run.py --site lake_erie --sensor pace`
 
 1. Login to Earthdata only if fewer than three NetCDFs are already downloaded.
-2. Search `PACE_OCI_L2_AOP` over the ROI and scene window; keep the first three granules.
+2. Search version `3.2` of `PACE_OCI_L2_AOP` over the configured ROI and scene window; keep the first three granules.
 3. Open NetCDF groups: `geophysical_data` (`Rrs`, `l2_flags`), `navigation_data` (lat/lon), `sensor_band_parameters`.
 4. `mask_and_scale=True` so packed `Rrs` becomes physical sr⁻¹.
 5. Mask pixels where any selected flag bit is set; crop to the ROI.
 6. Write Zarr with `Rrs`, `l2_flags`, `valid_water`, lat/lon, wavelengths, and granule attrs.
-7. Re-open Zarr and check shape, 172 bands, no finite `Rrs` on invalid pixels, value-range fraction, and whether any valid water remains.
+7. Re-open Zarr and check shape, the file-provided band count, no finite `Rrs` on invalid pixels, value-range fraction, and whether any valid water remains.
 8. Save sample-spectra PNGs under `figures/`.
+9. Write one JSON manifest per processed granule next to its Zarr store.
 
 ### Dependencies
 
@@ -105,13 +113,13 @@ On the two usable granules, spectra look like water: green peak near ~550 nm, dr
 | Topic | Choice | Why |
 |---|---|---|
 | First scene | Western **Lake Erie**, bbox above | Inland optically complex water; NOAA NCCOS 2024 CyanoHAB peak 10-day window (severity index 6.6); PACE OCI already used on 2024 Lake Erie blooms. |
-| Role of this scene | **Source-domain validation**, not an Indian HysIS target | Indian sites come later in Module 1. |
+| Role of this scene | **Source-domain validation**, not an Indian EnMAP target | Indian sites come later in Module 1. |
 | Scene window | `2024-08-10` to `2024-08-19` | Matches that NOAA peak window. |
 | Product | `PACE_OCI_L2_AOP` (science, not NRT) | Standard L2 AOP; `Rrs` after NASA atmospheric correction (`l2gen`). |
-| Processing version | **Not pinned** in search | Earthdata served V3.2. Pin `version="3.2"` later if results must be frozen. |
+| Processing version | **Pinned to `3.2`** in search | Keeps this validation run reproducible. |
 | Granule count | **3** | Small end-to-end check. |
 | Granule ranking | **First N search hits**, not cloud-cover ranked | PACE L2 UMM cloud-cover is often missing. |
-| Code shape | **One commented Python script** | First validation pass, not a production pipeline. |
+| Code shape | **Small config-driven package** | First validation pass, not a production pipeline. |
 | Environment | Project **`.venv`** | Keep the NASA/xarray stack off system Python. |
 | Credentials | `earthaccess.login(persist=True)` on this machine only | Never store passwords in the repo. |
 | Output | **One Zarr store per granule** | Chunked arrays for later ML; keep band-center wavelengths. |
@@ -132,10 +140,10 @@ On the two usable granules, spectra look like water: green peak near ~550 nm, dr
 
 ## Out of scope (for now)
 
-- HysIS ingest, calibration, or SRF / wavelength alignment to PACE
+- EnMAP ingest, calibration, or SRF / wavelength alignment to PACE
 - Indian HAB sites as target-domain scenes
 - Ranking granules by cloud cover or bloom intensity
-- Pinning processing version in `earthaccess.search_data`
+- Expanding beyond the pinned `3.2` processing version
 - SSL / embedding model, labels, or toxin ground truth (Lake Erie is **event-level** evidence, not toxin GT)
 - Scaling beyond three granules or a production pipeline
 
