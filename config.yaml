@@ -3,6 +3,22 @@ sites:
     bbox: [-83.70, 41.20, -82.30, 42.10]
     dates: ["2024-08-10", "2024-08-19"]
     water_type: lake
+  chilika:
+    bbox: [85.05, 19.45, 85.65, 19.95]
+    dates: ["2024-11-01", "2025-03-31"]
+    water_type: lagoon
+  pulicat:
+    bbox: [79.80, 13.30, 80.30, 13.75]
+    dates: ["2024-11-01", "2025-03-31"]
+    water_type: lagoon
+  vembanad:
+    bbox: [76.20, 9.50, 76.50, 10.20]
+    dates: ["2024-11-01", "2025-03-31"]
+    water_type: lake
+  n_arabian_sea:
+    bbox: [66.0, 20.0, 70.0, 24.0]
+    dates: ["2024-11-01", "2025-03-31"]
+    water_type: marine
 pace:
   short_name: PACE_OCI_L2_AOP
   version: "3.2"

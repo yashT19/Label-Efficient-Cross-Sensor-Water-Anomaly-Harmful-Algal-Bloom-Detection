@@ -8,3 +8,4 @@ numpy
 dask
 pyyaml
 pytest
+# torch is installed separately so you can pick the build for your GPU; see README

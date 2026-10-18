@@ -25,3 +25,6 @@ Thumbs.db
 *.swp
 
 prompt.md
+
+# Logs and local training output
+*.log
