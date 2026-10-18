@@ -138,6 +138,60 @@ On the two usable granules, spectra look like water: green peak near ~550 nm, dr
 
 ---
 
+## Added on the `indian-sites-alignment-model` branch
+
+Work built on top of the Lake Erie first pass. Everything here uses PACE data only; no EnMAP data is used yet.
+(The "Out of scope" list below was written for the first pass and is partly out of date.)
+
+### Steps, in the order to run them
+
+1. **Download Indian-site data:** `python fetch_sites.py 8` (needs the Earthdata login). Takes 8 granules per site, spread across Nov 2024 to Mar 2025, and processes them. Sites are listed in `config.yaml`.
+2. **Look at the data:** `python inspect_pace.py` writes plots and prints per-band statistics.
+3. **Build the training set:** `python build_dataset.py` collects the clean water spectra into `data/processed/pace_spectra.npz`.
+4. **Check the band alignment:** `python check_alignment.py` resamples real spectra to another sensor's band layout and plots before and after.
+5. **Classical baseline:** `python baseline_index.py` computes a standard chlorophyll index. It is not scored yet because there are no bloom labels.
+6. **Train the model:** `python train_ssl.py 3000` (a GPU is recommended; about 7 minutes on an RTX 5060).
+7. **Tests:** `pytest`. The Lake Erie tests need the downloaded Lake Erie files in `data/raw/`.
+
+### What the new code does
+
+| File | Purpose |
+|---|---|
+| `src/preprocess.py` | Drops bad pixels and splits each spectrum into its shape and its brightness |
+| `src/align.py` | Resamples a spectrum onto another sensor's bands; marks bands that cannot be filled (outside the range, or in PACE's 588-613 nm gap) |
+| `src/spectra_set.py` | One container for spectra from any sensor. An EnMAP reader only has to produce this. |
+| `src/model.py` | The model that reads band values together with their wavelengths, and its training loss |
+| `fetch_sites.py` | Downloads and processes granules for the Indian sites |
+| `build_dataset.py` | Builds the training set from all processed granules |
+| `train_ssl.py` | Trains the model without labels, holding out whole granules for checking |
+| `inspect_pace.py`, `check_alignment.py`, `baseline_index.py` | Inspection, alignment check and baseline index |
+| `tests/test_align_preprocess.py` | Checks for alignment and cleaning using made-up spectra (no download needed) |
+
+### Results so far (northern Arabian Sea is the only large site)
+
+| Site | Usable water pixels (8 granules) |
+|---|---|
+| Northern Arabian Sea | 363,017 |
+| Vembanad | 90 |
+| Pulicat | 41 |
+| Chilika | 0 |
+
+PACE pixels are about 1 km wide, so narrow lagoons are mostly masked out. The model's score on unseen pixels (matching the same pixel seen with PACE's bands and with a resampled band layout) rose from 0.2% before training to 43% after 3,000 steps (chance is 0.05%).
+
+### What this does not show yet
+
+- The second band layout is simulated from PACE's own bands. The EnMAP band settings in the code are placeholders and must be checked against a real EnMAP file.
+- There are no bloom labels, so there is no detection score and no baseline score.
+- One training run with one random seed.
+
+### Installing PyTorch for a new NVIDIA card (RTX 50-series)
+
+```
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+```
+
+---
+
 ## Out of scope (for now)
 
 - EnMAP ingest, calibration, or SRF / wavelength alignment to PACE
