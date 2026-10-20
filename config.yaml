@@ -23,12 +23,34 @@ pace:
   short_name: PACE_OCI_L2_AOP
   version: "3.2"
   n_granules: 3
+  n_granules_process: 5
   flags:
-    invalid: [ATMFAIL, LAND, HIGLINT, HILT, HISATZEN, STRAYLIGHT, CLDICE, COCCOLITH,
-              HISOLZEN, LOWLW, CHLFAIL, NAVWARN, MAXAERITER, CHLWARN, ATMWARN,
-              NAVFAIL, PRODFAIL]
+    invalid:
+      [
+        ATMFAIL,
+        LAND,
+        HIGLINT,
+        HILT,
+        HISATZEN,
+        STRAYLIGHT,
+        CLDICE,
+        COCCOLITH,
+        HISOLZEN,
+        LOWLW,
+        CHLFAIL,
+        NAVWARN,
+        MAXAERITER,
+        CHLWARN,
+        ATMWARN,
+        NAVFAIL,
+        PRODFAIL,
+      ]
 qc:
   rrs_range: [-0.01, 0.10]
+  summary_csv: data/processed/qc_summary.csv
+catalogue:
+  out_csv: data/catalogue/pace_granules.csv
+  ist_offset_hours: 5.5
 plots:
   n_spectra: 20
   seed: 42

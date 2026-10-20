@@ -9,12 +9,14 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import earthaccess
 import yaml
 
+from src.catalogue import backfill_catalogue, build_catalogue, read_catalogue
 from src.masking import load_masked_granule
-from src.pace_io import download_granules, login, search_granules
+from src.pace_io import download_granules, granule_label, login
 from src.plots import plot_sample_spectra
-from src.qc import validate_zarr
+from src.qc import summarize_granule, validate_zarr, write_qc_summary
 from src.zarr_schema import write_zarr
 
 LOGGER = logging.getLogger(__name__)
@@ -49,12 +51,73 @@ def write_manifest(
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _configured_path(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else ROOT / path
+
+
+def _granule_id(nc_path: Path, catalogue_rows: list[dict[str, str]]) -> str:
+    for row in catalogue_rows:
+        if row["granule_id"] in nc_path.name:
+            return row["granule_id"]
+    return nc_path.stem
+
+
+def _catalogue_targets(
+    config: dict[str, Any], site_name: str, raw_dir: Path, catalogue_path: Path
+) -> tuple[list[Path], list[dict[str, str]]]:
+    """Resolve ranked catalogue rows to local files, downloading only selected rows."""
+    rows = read_catalogue(catalogue_path)
+    site_rows = sorted(
+        [row for row in rows if row["site"] == site_name],
+        key=lambda row: int(row.get("rank") or 999999),
+    )
+    limit = int(config["sites"][site_name].get(
+        "n_granules", config["pace"]["n_granules_process"]
+    ))
+    site_rows = site_rows[:limit]
+    existing: dict[str, Path] = {
+        row["granule_id"]: path for row in raw_dir.glob("*.nc")
+        for row in site_rows
+        if row["granule_id"] in path.name
+        and (
+            not row.get("size_mb")
+            or path.stat().st_size >= float(row["size_mb"]) * 1e6 * 0.99
+        )
+    }
+    missing = [row for row in site_rows if row["granule_id"] not in existing]
+    if missing:
+        login()
+        results = earthaccess.search_data(
+            short_name=config["pace"]["short_name"],
+            version=str(config["pace"]["version"]),
+            bounding_box=tuple(config["sites"][site_name]["bbox"]),
+            temporal=tuple(config["sites"][site_name]["dates"]),
+            count=25,
+        )
+        selected = [
+            granule for granule in results
+            if any(granule_label(granule) == row["granule_id"] for row in missing)
+        ]
+        if len(selected) != len(missing):
+            found = {granule_label(granule) for granule in selected}
+            LOGGER.warning("Could not resolve catalogue granules: %s",
+                           ", ".join(row["granule_id"] for row in missing
+                                     if row["granule_id"] not in found))
+        for path in download_granules(selected, raw_dir):
+            for row in missing:
+                if row["granule_id"] in path.name:
+                    existing[row["granule_id"]] = path
+    return [existing[row["granule_id"]] for row in site_rows if row["granule_id"] in existing], site_rows
+
+
 def main() -> None:
     """Run the requested sensor pipeline."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--site", required=True)
     parser.add_argument("--sensor", choices=["pace"], required=True)
     parser.add_argument("--config", type=Path, default=ROOT / "config.yaml")
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config = load_config(args.config)
@@ -64,32 +127,53 @@ def main() -> None:
     site = config["sites"][args.site]
     pace = config["pace"]
     paths = config["paths"]
-    raw_dir = ROOT / paths["raw"]
-    zarr_dir = ROOT / paths["zarr"]
-    figure_dir = ROOT / paths["figures"]
+    raw_dir = _configured_path(paths["raw"])
+    zarr_dir = _configured_path(paths["zarr"])
+    figure_dir = _configured_path(paths["figures"])
+    catalogue_path = _configured_path(config["catalogue"]["out_csv"])
+    qc_path = _configured_path(config["qc"]["summary_csv"])
     raw_dir.mkdir(parents=True, exist_ok=True)
     zarr_dir.mkdir(parents=True, exist_ok=True)
     figure_dir.mkdir(parents=True, exist_ok=True)
 
     existing = sorted(raw_dir.glob("PACE_OCI.*.L2.OC_AOP*.nc"))
-    if len(existing) >= pace["n_granules"]:
-        nc_files = existing[:pace["n_granules"]]
+    lake_erie_baseline = args.site == "lake_erie" and len(existing) >= int(
+        site.get("n_granules", pace["n_granules"])
+    )
+    if lake_erie_baseline:
+        nc_files = existing[:int(site.get("n_granules", pace["n_granules"]))]
+        catalogue_rows = read_catalogue(catalogue_path) if catalogue_path.exists() else []
         LOGGER.info("Using existing NetCDF downloads (skip Earthdata search)")
     else:
-        login()
-        granules = search_granules(
-            pace["short_name"], pace["version"], site["bbox"], site["dates"],
-            pace["n_granules"],
+        if not catalogue_path.exists():
+            build_catalogue(config, args.site)
+        nc_files, catalogue_rows = _catalogue_targets(
+            config, args.site, raw_dir, catalogue_path
         )
-        nc_files = download_granules(granules, raw_dir)
 
+    qc_rows: list[dict[str, Any]] = []
     for nc_path in nc_files:
         LOGGER.info("Processing %s", nc_path.name)
+        zarr_path = zarr_dir / f"{nc_path.stem}.zarr"
+        manifest = manifest_path(zarr_dir, nc_path)
+        granule_id = _granule_id(nc_path, catalogue_rows)
+        if not args.force and zarr_path.exists() and manifest.exists():
+            LOGGER.info("Skipping complete processed granule %s", nc_path.name)
+            ds_r, _ = validate_zarr(zarr_path, config["qc"]["rrs_range"])
+            qc_rows.append(summarize_granule(
+                ds_r, args.site, granule_id, pace["flags"]["invalid"],
+                config["qc"]["rrs_range"],
+            ))
+            ds_r.close()
+            continue
         ds = load_masked_granule(
             nc_path, site["bbox"], site["dates"], pace["short_name"],
             pace["flags"]["invalid"],
         )
-        zarr_path = zarr_dir / f"{nc_path.stem}.zarr"
+        qc_rows.append(summarize_granule(
+            ds, args.site, granule_id, pace["flags"]["invalid"],
+            config["qc"]["rrs_range"],
+        ))
         write_zarr(ds, zarr_path)
         ds.close()
         ds_r, _ = validate_zarr(zarr_path, config["qc"]["rrs_range"])
@@ -101,9 +185,12 @@ def main() -> None:
         )
         ds_r.close()
         write_manifest(
-            manifest_path(zarr_dir, nc_path), nc_path, pace["version"],
+            manifest, nc_path, pace["version"],
             site["bbox"], pace["flags"]["invalid"],
         )
+    write_qc_summary(qc_path, qc_rows)
+    if catalogue_path.exists() and qc_rows:
+        backfill_catalogue(catalogue_path, qc_rows)
     LOGGER.info("Done")
 
 
