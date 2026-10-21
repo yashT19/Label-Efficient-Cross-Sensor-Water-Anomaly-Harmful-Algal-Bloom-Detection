@@ -153,8 +153,10 @@ Work built on top of the Lake Erie first pass. Everything here uses PACE data on
 3. **Build the training set:** `python build_dataset.py` collects the clean water spectra into `data/processed/pace_spectra.npz`.
 4. **Check the band alignment:** `python check_alignment.py` resamples real spectra to another sensor's band layout and plots before and after.
 5. **Classical baseline:** `python baseline_index.py` computes a standard chlorophyll index. It is not scored yet because there are no bloom labels.
-6. **Train the model:** `python train_ssl.py 3000` (a GPU is recommended; about 7 minutes on an RTX 5060).
-7. **Tests:** `pytest`. The Lake Erie tests need the downloaded Lake Erie files in `data/raw/`.
+6. **Build the EnMAP set (once you have EnMAP scenes):** `python build_enmap_dataset.py <folder with the unpacked DLR orders>`. It reads every `ENMAP.HSI.L2A/*.ZIP`, keeps clear-water pixels on the 55 bands between 400 and 720 nm, and saves the spectra plus the real band centres and widths.
+7. **Train the model:** `python train_ssl.py 3000` (a GPU is recommended; about 8 minutes on an RTX 5060). If the EnMAP band file from step 6 exists, the second view of each pixel is resampled to the real EnMAP bands; otherwise made-up band layouts are used.
+8. **Try real EnMAP spectra on the trained model:** `python enmap_zero_shot.py`. The model never trains on EnMAP.
+9. **Tests:** `pytest`. The Lake Erie tests need the downloaded Lake Erie files in `data/raw/`.
 
 ### What the new code does
 
@@ -162,7 +164,10 @@ Work built on top of the Lake Erie first pass. Everything here uses PACE data on
 |---|---|
 | `src/preprocess.py` | Drops bad pixels and splits each spectrum into its shape and its brightness |
 | `src/align.py` | Resamples a spectrum onto another sensor's bands; marks bands that cannot be filled (outside the range, or in PACE's 588-613 nm gap) |
-| `src/spectra_set.py` | One container for spectra from any sensor. An EnMAP reader only has to produce this. |
+| `src/spectra_set.py` | One container for spectra from any sensor |
+| `src/enmap_io.py` | Reads a delivered EnMAP water-product scene (the ZIP) into that container: clear-water pixels only, real band centres and widths from the scene's metadata |
+| `build_enmap_dataset.py`, `enmap_zero_shot.py` | Build the EnMAP set from delivered scenes; run real EnMAP spectra through the trained model |
+| `tests/test_enmap_io.py` | Checks the EnMAP reader on a tiny made-up scene (no real data needed) |
 | `src/model.py` | The model that reads band values together with their wavelengths, and its training loss |
 | `fetch_sites.py` | Downloads and processes granules for the Indian sites |
 | `build_dataset.py` | Builds the training set from all processed granules |
@@ -183,7 +188,9 @@ PACE pixels are about 1 km wide, so narrow lagoons are mostly masked out. The mo
 
 ### What this does not show yet
 
-- The second band layout is simulated from PACE's own bands. The EnMAP band settings in the code are placeholders and must be checked against a real EnMAP file.
+- The training pairs still compare PACE with a copy of itself resampled to EnMAP's real band layout. They are not matched PACE and EnMAP pixels, because NASA's standard PACE product has no reflectance values over the turbid waters in the scenes we have.
+- It is not yet confirmed whether EnMAP's stored water reflectance is Rrs (as in PACE) or pi times Rrs. Check DLR's water-product documentation.
+- The EnMAP scenes we have are Lake Victoria, Gulf of Khambhat (India), Lake Erie and Lake Winnipeg. Two of them (Gulf of Khambhat April 2026, Lake Erie June 2026) are fully sun-glint affected.
 - There are no bloom labels, so there is no detection score and no baseline score.
 - One training run with one random seed.
 

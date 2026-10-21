@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 MIN_NM = 400.0
+MAX_NM = 720.0   # same window as src/preprocess.py: PACE and EnMAP are averaged over the same bands
 FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
 
 
@@ -24,7 +25,7 @@ def align_t(x, src, tgt, fwhm, min_cov=0.5):
 
 def features(x, wl, valid):
     """Spectrum -> (shape = x / own mean over valid bands >= 400 nm, log-brightness)."""
-    use = (valid & (wl >= MIN_NM)).float()
+    use = (valid & (wl >= MIN_NM) & (wl <= MAX_NM)).float()
     mean = ((x * use).sum(-1) / use.sum(-1).clamp_min(1)).clamp_min(1e-5)
     shape = torch.where(valid, x / mean[:, None], torch.zeros_like(x))
     return shape, (torch.log(mean) + 6.0) / 2.0   # fixed constants, not fit on any sensor

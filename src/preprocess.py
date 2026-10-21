@@ -6,6 +6,7 @@ import numpy as np
 
 NEG_DROP = -0.001   # drop pixel if any band >= MIN_NM is below this (failed atm. correction)
 MIN_NM = 400.0
+MAX_NM = 720.0      # PACE's Rrs stops at 719 nm; both sensors are judged on the same window
 MIN_MEAN = 1e-4     # drop near-zero-signal pixels: shape is undefined there
 
 
@@ -14,7 +15,7 @@ def clean_spectra(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (cleaned spectra, keep mask). rrs is (n_pixels, n_bands)."""
     rrs = np.asarray(rrs, dtype="float64")
-    use = wavelength >= MIN_NM
+    use = (wavelength >= MIN_NM) & (wavelength <= MAX_NM)
     if band_valid is not None:
         use &= band_valid
     sub = rrs[:, use]
@@ -30,7 +31,7 @@ def shape_and_brightness(
     Shape is sensor-independent; brightness is kept as a separate feature.
     The mean runs over the same bands for every pixel (>= MIN_NM, valid bands).
     """
-    use = wavelength >= MIN_NM
+    use = (wavelength >= MIN_NM) & (wavelength <= MAX_NM)
     if band_valid is not None:
         use &= band_valid
     mean = rrs[:, use].mean(1, keepdims=True)

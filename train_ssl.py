@@ -20,7 +20,20 @@ p = 1 / np.sqrt(cnt[S.granule[tr]]); p /= p.sum()    # soften dominance of the b
 print("train px", len(tr), "val px", len(va), "val granules", [str(names[i]) for i in hold])
 allv = torch.ones_like(wl, dtype=torch.bool)
 
+# the REAL EnMAP band layout (centres and widths from EnMAP metadata); run build_enmap_dataset.py first
+EB = Path("data/processed/enmap_bands.npz")
+if EB.exists():
+    _e = np.load(EB); EN_C = torch.tensor(_e["wavelength_nm"], dtype=torch.float32, device=dev)
+    EN_F = torch.tensor(_e["fwhm_nm"], dtype=torch.float32, device=dev)
+    print("using the real EnMAP band layout:", len(EN_C), "bands")
+else:
+    EN_C = None; print("no enmap_bands.npz: using made-up band layouts only")
+
 def grid(r):
+    # 70% of the time the real EnMAP bands (slightly jittered so the model does not memorise them),
+    # otherwise a random layout so the model also copes with other sensors
+    if EN_C is not None and r.random() < 0.7:
+        return EN_C + float(r.normal(0, 0.5)), EN_F * float(r.uniform(0.9, 1.15))
     sp = float(r.choice([5.0, 6.5, 8.0, 10.0])); st = float(r.uniform(400, 430))
     tgt = torch.arange(st, 720.0, sp, device=dev)
     return tgt, tgt.new_full(tgt.shape, sp * float(r.uniform(1.0, 1.4)))
@@ -40,10 +53,11 @@ def view_a(x, noise=True):
         x = (x + torch.randn_like(x) * 5e-5) * torch.exp(0.05 * torch.randn(len(x), 1, device=dev))
     s, lb = features(x.clamp_min(0), wl, allv[None].expand(len(x), -1)); return s, lb
 
-def embed(enc, x, b_grid=(6.5, 8.0)):
+def embed(enc, x):
     sa, la = view_a(x, False)
-    tgt = torch.arange(420.0, 720.0, b_grid[0], device=dev)
-    out, v = align_t(x, wl, tgt, tgt.new_full(tgt.shape, b_grid[1])); v = v[None].expand(len(x), -1)
+    tgt, fw = (EN_C, EN_F) if EN_C is not None else (torch.arange(420.0, 720.0, 6.5, device=dev), None)
+    fw = fw if fw is not None else tgt.new_full(tgt.shape, 8.0)
+    out, v = align_t(x, wl, tgt, fw); v = v[None].expand(len(x), -1)
     sb, lb = features(out, tgt, v)
     return enc(sa, wl, allv[None].expand(len(x), -1), la), enc(sb, tgt, v, lb)
 
